@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FloodMate — Street-Level Flood Radar & Passability Intelligence</title>
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- App Stylesheets -->
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/components.css">
+
+  <!-- Chart.js & Leaflet JS via CDN -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ============================================================== -->
+  <!-- 1. HEADER & VEHICLE PASSABILITY SELECTOR                       -->
+  <!-- ============================================================== -->
+  <header class="app-header">
+    <div class="header-top">
+      <div class="brand-group">
+        <div class="brand-icon-wrapper">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-name">Flood<span>Mate</span>™</h1>
+          <div class="brand-tagline">Street-Level Water Telemetry &amp; Passability</div>
+        </div>
+      </div>
+
+      <!-- Vehicle Passability Filter Selector -->
+      <div class="vehicle-selector-bar">
+        <span class="vehicle-selector-label">My Vehicle:</span>
+        <div class="vehicle-toggle-group">
+          <button class="vehicle-toggle-btn" data-vehicle="motorcycle" title="Clearance limit 15 cm">
+            <span>🛵</span> Motorcycle
+          </button>
+          <button class="vehicle-toggle-btn active" data-vehicle="sedan" title="Clearance limit 25 cm">
+            <span>🚗</span> Sedan
+          </button>
+          <button class="vehicle-toggle-btn" data-vehicle="suv" title="Clearance limit 40 cm">
+            <span>🚙</span> SUV
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="header-actions">
+        <button id="reset-demo-data-btn" class="btn btn-sm btn-outline" style="border-color: rgba(255,255,255,0.2); color: #E2E8F0;" title="Reset Mock State">
+          🔄 Reset Demo
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Radar Scan Ticker Strip -->
+    <div class="radar-scan-strip">
+      <div class="radar-scan-inner" id="radar-scan-status">
+        <div class="radar-pulse-dot"></div>
+        <span><strong>RADAR SCAN:</strong> Active in Bangkok Basin &bull; Telemetry points online</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================== -->
+  <!-- 2. NAVIGATION BAR                                              -->
+  <!-- ============================================================== -->
+  <nav class="nav-tabs-wrapper">
+    <div class="nav-tabs">
+      <button class="nav-tab-btn active" data-tab="radar-map">
+        <span>🗺️</span> Real-Time Radar Map
+      </button>
+      <button class="nav-tab-btn" data-tab="alerts-forecast">
+        <span>⚠️</span> Alerts &amp; Peak Forecast
+        <span class="nav-tab-badge" id="nav-alerts-badge">Live</span>
+      </button>
+      <button class="nav-tab-btn" data-tab="report-flood">
+        <span>📸</span> Report Flood (AI Depth)
+      </button>
+      <button class="nav-tab-btn" data-tab="org-dashboard">
+        <span>🏢</span> Juristic &amp; Org Dashboard
+      </button>
+      <button class="nav-tab-btn" data-tab="roadmap">
+        <span>🔮</span> Enterprise Roadmap
+      </button>
+    </div>
+  </nav>
+
+  <!-- ============================================================== -->
+  <!-- 3. MAIN TAB PANES                                              -->
+  <!-- ============================================================== -->
+  <main class="app-main">
+
+    <!-- TAB 1: RADAR MAP VIEW -->
+    <section class="tab-pane active" id="tab-radar-map">
+      <div class="map-view-layout">
+        
+        <!-- Floating Info Overlay on Map -->
+        <div class="map-floating-overlay">
+          <div class="map-filter-card">
+            <h4>Radar Passability Matrix</h4>
+            <p>Markers color-code automatically to your selected vehicle's water clearance boundary.</p>
+            <div class="map-legend-row">
+              <div class="legend-item"><span class="legend-dot safe"></span> Safe to Pass</div>
+              <div class="legend-item"><span class="legend-dot caution"></span> Caution</div>
+              <div class="legend-item"><span class="legend-dot danger"></span> Impassable</div>
+            </div>
+            <div style="font-size: 10.5px; color: #94A3B8; margin-top: 8px;">
+              💡 <em>Tip: Click anywhere on the map to submit a crowdsourced flood report.</em>
+            </div>
+          </div>
+        </div>
+
+        <!-- The Leaflet Map Instance -->
+        <div id="map"></div>
+
+        <!-- Slide-Over Point Detail Drawer -->
+        <aside class="point-detail-drawer" id="point-detail-drawer">
+          <div class="drawer-header">
+            <div>
+              <span class="badge" style="background: rgba(72, 202, 228, 0.2); color: #48CAE4; font-size: 10.5px; padding: 2px 6px; border-radius: 4px;">TELEMETRY POINT</span>
+              <h3 id="drawer-point-title" style="margin-top: 4px; font-size: 16px;">Sensor Detail</h3>
+            </div>
+            <button class="drawer-close-btn" id="close-drawer-btn">&times;</button>
+          </div>
+
+          <div class="drawer-body">
+            <!-- Key Numbers -->
+            <div class="drawer-stat-grid">
+              <div class="stat-box">
+                <div class="stat-box-label">Current Water Depth</div>
+                <div class="stat-box-val"><span id="drawer-depth-cm">--</span> <small style="font-size: 12px; font-weight: normal;">cm</small></div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-label">Rate of Change</div>
+                <div class="stat-box-val" id="drawer-trend-text" style="font-size: 15px;">--</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-label">Confidence Level</div>
+                <div class="stat-box-val" id="drawer-confidence-score" style="font-size: 15px; color: #059669;">--</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-label">Rainfall Rate</div>
+                <div class="stat-box-val" id="drawer-rainfall" style="font-size: 15px;">--</div>
+              </div>
+            </div>
+
+            <!-- Peak Forecast Box -->
+            <div id="drawer-forecast-box"></div>
+
+            <!-- Historical & Predictive Trend Chart -->
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; text-transform: uppercase;">
+                Water Level Trend (Past Hours &amp; Projected Peak)
+              </div>
+              <div class="chart-container-wrapper">
+                <canvas id="trendChartCanvas"></canvas>
+              </div>
+            </div>
+
+            <!-- Vehicle Clearance Breakdown -->
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; text-transform: uppercase;">
+                Vehicle Clearance Analysis
+              </div>
+              <div id="drawer-vehicle-matrix"></div>
+            </div>
+
+            <!-- Telemetry Source & Notes -->
+            <div style="background: #F8FAFC; padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-light); font-size: 12px;">
+              <div><strong>Source:</strong> <span id="drawer-source-type">--</span></div>
+              <div style="margin-top: 4px;"><strong>Drainage Notes:</strong> <span id="drawer-notes">--</span></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- TAB 2: ALERTS & FORECAST VIEW -->
+    <section class="tab-pane" id="tab-alerts-forecast">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title"><span>⚠️</span> Saved Coordinates &amp; Predictive Flood Alerts</h2>
+          <p class="section-subtitle">Real-time proximity warnings and estimated time-to-peak calculated for your home, office, and parked vehicles.</p>
+        </div>
+
+        <!-- List of Alert Cards for Saved Locations -->
+        <div class="alerts-card-list" id="alerts-card-list"></div>
+
+        <!-- Form to Add Custom Location -->
+        <div class="card" style="margin-top: 24px;">
+          <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 14px; color: var(--bg-dark);">
+            📍 Add New Saved Coordinate
+          </h3>
+          <form id="add-location-form" class="grid-3">
+            <div class="form-group">
+              <label class="form-label">Location Name</label>
+              <input type="text" id="new-loc-name" class="form-control" placeholder="e.g., Mom's House, Parked SUV" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Category</label>
+              <select id="new-loc-category" class="form-control">
+                <option value="home">🏠 Home</option>
+                <option value="work">🏢 Work</option>
+                <option value="car">🚗 Parked Car</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Address / Landmark</label>
+              <input type="text" id="new-loc-address" class="form-control" placeholder="e.g., Soi Thonglor 10">
+            </div>
+            <div style="grid-column: 1 / -1;">
+              <button type="submit" class="btn btn-primary">
+                ➕ Save Coordinate &amp; Enable Radar Watch
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: PHOTO REPORTING & AI DEPTH ESTIMATION -->
+    <section class="tab-pane" id="tab-report-flood">
+      <div class="container photo-reporting-wrapper">
+        <div class="section-header">
+          <h2 class="section-title"><span>📸</span> Photo-Based Flood Reporting &amp; AI Verification</h2>
+          <p class="section-subtitle">Crowdsource water depths with reference object guides. The AI engine verifies ground truth measurements before pushing to the live radar map.</p>
+        </div>
+
+        <form id="flood-report-form" class="card">
+          <!-- Step 1: Reference Object Selector -->
+          <div class="form-group">
+            <label class="form-label">Step 1: Select Visual Reference Object in Photo</label>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+              Our computer vision depth estimator uses known physical objects in your camera frame to compute water depth in centimeters.
+            </p>
+            <div class="reference-objects-selector" id="reference-objects-selector"></div>
+          </div>
+
+          <!-- Step 2: Photo Upload or Preset Picker -->
+          <div class="form-group">
+            <label class="form-label">Step 2: Upload Flood Photo</label>
+            
+            <!-- Quick Preset Samples for instant desktop demonstration -->
+            <div style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span style="font-size: 12px; color: #64748B; font-weight: 600;">Demo Sample Presets:</span>
+              <button type="button" class="btn btn-sm btn-outline preset-photo-btn" data-src="https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=800&q=80">
+                🚗 Car Wheel Submerged (~28cm)
+              </button>
+              <button type="button" class="btn btn-sm btn-outline preset-photo-btn" data-src="https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?auto=format&fit=crop&w=800&q=80">
+                🌧️ Street Curb Overflow (~18cm)
+              </button>
+            </div>
+
+            <div class="photo-dropzone" onclick="document.getElementById('photo-file-input').click()">
+              <input type="file" id="photo-file-input" accept="image/*" style="display: none;">
+              <div id="photo-dropzone-placeholder">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" style="margin-bottom: 8px;">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                <div style="font-size: 13.5px; font-weight: 700; color: #1E293B;">Click or Drag Flood Photo Here</div>
+                <div style="font-size: 11.5px; color: #94A3B8;">Supports JPG, PNG, HEIC from smartphone camera</div>
+              </div>
+              <div class="photo-preview-container" id="photo-preview-container">
+                <img id="photo-preview-img" src="" alt="Flood Preview">
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Location Coordinates & Notes -->
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label">Road / Landmark Name</label>
+              <input type="text" id="report-road" class="form-control" placeholder="e.g., Sukhumvit Soi 23 Corner" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Reporter Name (Optional)</label>
+              <input type="text" id="report-name" class="form-control" placeholder="e.g., Somchai K.">
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label">Latitude</label>
+              <input type="number" id="report-lat" class="form-control" step="0.00001" value="13.7385" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Longitude</label>
+              <input type="number" id="report-lng" class="form-control" step="0.00001" value="100.5650" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Observations / Obstacles</label>
+            <textarea id="report-notes" class="form-control" rows="2" placeholder="e.g., Sedans cannot pass, motorbikes slipping on curb..."></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width: 100%; padding: 14px; font-size: 15px;">
+            🤖 Run AI Depth Verification &amp; Submit to Radar
+          </button>
+        </form>
+
+        <!-- AI Laser Scanning Modal Overlay -->
+        <div class="ai-scan-modal" id="ai-scan-modal">
+          <div class="ai-scan-box">
+            <div class="ai-scanner-visual">
+              <div class="ai-laser-line"></div>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#48CAE4" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            </div>
+            <h3 style="font-size: 18px; font-weight: 800; color: #FFFFFF;">AI Optical Depth Engine</h3>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="ai-scan-progress"></div>
+            </div>
+            <div id="ai-scan-status-text" style="font-size: 12.5px; color: #94A3B8;">Analyzing pixel boundary and water surface reflection...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: JURISTIC & ORGANIZATION DASHBOARD -->
+    <section class="tab-pane" id="tab-org-dashboard">
+      <div class="container">
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <h2 class="section-title"><span>🏢</span> Organization &amp; Juristic Management Portal</h2>
+            <p class="section-subtitle">Dedicated command console for condo juristic offices, parking operators, and facility engineers.</p>
+          </div>
+          <button id="export-insurance-pdf-btn" class="btn btn-primary">
+            📄 Export Insurance Dossier (PDF)
+          </button>
+        </div>
+
+        <!-- 1. Building / Facility Risk Point Monitors -->
+        <div class="card" style="margin-bottom: 24px;">
+          <h3 style="font-size: 16px; font-weight: 800; color: var(--bg-dark); margin-bottom: 4px;">
+            Critical Facility Risk Points &amp; Flood Barrier Telemetry
+          </h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+            Monitored facility: <strong>Grand Sukhumvit Residence Juristic Office</strong>
+          </p>
+          <div style="overflow-x: auto;">
+            <table class="org-table">
+              <thead>
+                <tr>
+                  <th>Facility Risk Location</th>
+                  <th>Water Depth</th>
+                  <th>Threshold</th>
+                  <th>Status</th>
+                  <th>Pumps &amp; Barriers</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="org-facilities-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- 2. Emergency Broadcast Dispatcher -->
+          <div class="card">
+            <h3 style="font-size: 16px; font-weight: 800; color: var(--bg-dark); margin-bottom: 6px;">
+              📢 Dispatch Resident &amp; Driver Advisory
+            </h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              Instantly sends push announcements to connected condominium residents and parking lot vehicles.
+            </p>
+            <form id="org-broadcast-form">
+              <div class="form-group">
+                <label class="form-label">Advisory Urgency</label>
+                <select id="broadcast-urgency" class="form-control">
+                  <option value="HIGH">🚨 HIGH - Critical Action Required (Move Cars)</option>
+                  <option value="MEDIUM">⚠️ MEDIUM - Precautionary Alert</option>
+                  <option value="LOW">ℹ️ INFO - Routine Water Receding Update</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Announcement Title</label>
+                <input type="text" id="broadcast-title" class="form-control" placeholder="e.g., Immediate Car Evacuation from Basement B2" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Message Details</label>
+                <textarea id="broadcast-body" class="form-control" rows="3" placeholder="Provide instructions on safe upper parking floors, floodgate sealing timelines..." required></textarea>
+              </div>
+              <button type="submit" class="btn btn-danger" style="width: 100%;">
+                Broadcast to 320 Residents &amp; Parking System
+              </button>
+            </form>
+          </div>
+
+          <!-- 3. Active Announcements Feed -->
+          <div class="card">
+            <h3 style="font-size: 16px; font-weight: 800; color: var(--bg-dark); margin-bottom: 14px;">
+              Active Organization Advisories
+            </h3>
+            <div id="org-announcements-list"></div>
+          </div>
+        </div>
+
+        <!-- 4. Chronological Incident Evidence Timeline -->
+        <div class="card" style="margin-top: 24px;">
+          <h3 style="font-size: 16px; font-weight: 800; color: var(--bg-dark); margin-bottom: 4px;">
+            Immutable Incident Timeline &amp; Insurance Audit Trail
+          </h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+            Chronological cryptographic ledger tracking all sensor thresholds, automated flood barrier deployments, and citizen-verified photos for insurance adjusters.
+          </p>
+          <div class="timeline-stream" id="org-timeline-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: FUTURE ENTERPRISE ROADMAP -->
+    <section class="tab-pane" id="tab-roadmap">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title"><span>🔮</span> Future Enterprise Roadmap &amp; API Integrations</h2>
+          <p class="section-subtitle">Upcoming ecosystem extensions currently in private testing (clearly marked non-functional preview placeholders).</p>
+        </div>
+
+        <div class="grid-3">
+          <div class="roadmap-card">
+            <span class="lock-badge">🔒 Q3 ENTERPRISE PILOT</span>
+            <h3 style="font-size: 17px; font-weight: 800; color: var(--bg-dark); margin-bottom: 8px;">
+              Parametric Insurance Claim API
+            </h3>
+            <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px;">
+              Smart contract integration with insurance underwriters. Automatically triggers instant claim payouts when verified water depth exceeds policy thresholds for >60 minutes.
+            </p>
+            <div style="background: #F1F5F9; padding: 10px; border-radius: var(--radius-sm); font-family: monospace; font-size: 11px; color: #475569;">
+              POST /v1/claims/parametric-dispatch<br>
+              Authorization: Bearer &bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;
+            </div>
+            <button class="btn btn-sm btn-outline" style="margin-top: 14px; width: 100%; opacity: 0.6; cursor: not-allowed;">
+              Preview Sandbox Spec
+            </button>
+          </div>
+
+          <div class="roadmap-card">
+            <span class="lock-badge">🔒 Q4 REAL ESTATE SUITE</span>
+            <h3 style="font-size: 17px; font-weight: 800; color: var(--bg-dark); margin-bottom: 8px;">
+              Property Flood Risk Score (PFRS)
+            </h3>
+            <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px;">
+              Proprietary 10-year risk rating (AAA to CCC) for condos, office towers, and logistics hubs combining historical basin accumulation and municipal pump proximity.
+            </p>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin: 12px 0;">
+              <span style="font-size: 28px; font-weight: 900; color: #0284C7;">8.4 / 10</span>
+              <span style="font-size: 12px; color: #059669; font-weight: 700;">Low Basin Risk</span>
+            </div>
+            <button class="btn btn-sm btn-outline" style="width: 100%; opacity: 0.6; cursor: not-allowed;">
+              Request Valuation Demo
+            </button>
+          </div>
+
+          <div class="roadmap-card">
+            <span class="lock-badge">🔒 Q1 2027 HARDWARE MESH</span>
+            <h3 style="font-size: 17px; font-weight: 800; color: var(--bg-dark); margin-bottom: 8px;">
+              Automated IoT Sluice Barrier Protocol
+            </h3>
+            <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 14px;">
+              Direct LoRaWAN communication interface enabling municipal drainage gates and parking ramp flood barriers to automatically seal without human intervention.
+            </p>
+            <div style="background: #F1F5F9; padding: 10px; border-radius: var(--radius-sm); font-family: monospace; font-size: 11px; color: #475569;">
+              Mesh Protocol: LoRa 923 MHz<br>
+              Status: Hardware Testing Lab
+            </div>
+            <button class="btn btn-sm btn-outline" style="margin-top: 14px; width: 100%; opacity: 0.6; cursor: not-allowed;">
+              Hardware Partner Inquiries
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Main ES6 Application Coordinator -->
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
